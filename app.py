@@ -8,22 +8,16 @@ st.set_page_config(page_title="SpaceMolt: Terminale Agente", page_icon="🚀")
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-# Stile Cyber-Terminal
-st.markdown("""
-    <style>
-    .main { background-color: #050a0f; color: #00ff41; font-family: 'Courier New'; }
-    .stButton>button { 
-        width: 100%; border-radius: 4px; background-color: #002200; 
-        color: #00ff41; border: 1px solid #00ff41; font-weight: bold;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+# --- GESTIONE SESSIONE PERSISTENTE ---
+# Usiamo st.session_state per mantenere lo stesso oggetto Session di requests
+if 'http_session' not in st.session_state:
+    st.session_state.http_session = requests.Session()
 
-# --- SEQUENZA DI INIZIALIZZAZIONE (HANDSHAKE) ---
 def esegui_handshake():
-    """Esegue la sequenza: initialize -> notifications/initialized"""
+    """Esegue l'inizializzazione completa mantenendo la sessione attiva"""
+    session = st.session_state.http_session
     try:
-        # 1. Chiamata di inizializzazione
+        # 1. Initialize
         init_payload = {
             "jsonrpc": "2.0",
             "method": "initialize",
@@ -34,25 +28,26 @@ def esegui_handshake():
             },
             "id": 1
         }
-        res = requests.post(API_URL, json=init_payload, timeout=5).json()
+        res = session.post(API_URL, json=init_payload, timeout=10).json()
         
         if "error" in res:
-            return False, res["error"]["message"]
+            return False, f"Errore Init: {res['error']['message']}"
 
-        # 2. Notifica di completamento (Obbligatoria per sbloccare il server)
+        # 2. Notifications/Initialized (Fondamentale: è una NOTIFICA, quindi SENZA ID)
         notify_payload = {
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
             "params": {}
         }
-        requests.post(API_URL, json=notify_payload, timeout=5)
+        session.post(API_URL, json=notify_payload, timeout=10)
         
-        return True, "Handshake completato con successo!"
+        return True, "Handshake e Notifica completati. Tunnel stabile."
     except Exception as e:
         return False, str(e)
 
-# --- FUNZIONE COMANDI ---
 def invia_ordine(nome_comando, argomenti={}):
+    """Invia comandi usando la sessione HTTP salvata"""
+    session = st.session_state.http_session
     payload = {
         "jsonrpc": "2.0",
         "method": "tools/call",
@@ -63,30 +58,29 @@ def invia_ordine(nome_comando, argomenti={}):
         "id": int(time.time())
     }
     try:
-        response = requests.post(API_URL, json=payload, timeout=5)
+        response = session.post(API_URL, json=payload, timeout=10)
         return response.json()
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Errore invio: {e}"}
 
 # --- INTERFACCIA ---
 st.title("🛰️ SpaceMolt: Hub di Comando")
-st.write(f"**Codice Registrazione:** `{REG_CODE[:8]}...`")
 
 if 'session_active' not in st.session_state:
     st.session_state.session_active = False
 
 if not st.session_state.session_active:
     st.warning("⚠️ Sessione non inizializzata.")
-    if st.button("🔌 AVVIA PROTOCOLLO DI CONNESSIONE"):
+    if st.button("🔌 APRI TUNNEL DI COMANDO"):
         successo, msg = esegui_handshake()
         if successo:
             st.session_state.session_active = True
             st.success(msg)
             st.rerun()
         else:
-            st.error(f"Fallimento Handshake: {msg}")
+            st.error(f"Fallimento: {msg}")
 else:
-    st.success("📡 Collegamento Neurale Stabilito")
+    st.success("📡 Collegamento Neurale Stabilito (Tunnel Attivo)")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -100,12 +94,7 @@ else:
             st.json(invia_ordine("get_ship_status"))
 
     st.divider()
-    
-    # Sezione AI (Ammiraglio)
-    ordine_libero = st.text_input("Comunica con l'Agente IA", placeholder="Es: Spostati verso l'asteroide più ricco")
-    if st.button("ESEGUI ORDINE"):
-        st.info(f"Ricevuto, Comandante. Sto elaborando la sequenza per: {ordine_libero}")
-
-    if st.button("Termina Sessione"):
+    if st.button("Chiudi Sessione"):
         st.session_state.session_active = False
+        st.session_state.http_session = requests.Session() # Reset sessione
         st.rerun()
