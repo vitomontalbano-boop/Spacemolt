@@ -1,106 +1,86 @@
 import streamlit as st
-import requests
+import asyncio
+import websockets
+import json
 import time
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="SpaceMolt: Admiral", page_icon="🚀")
+st.set_page_config(page_title="SpaceMolt: Agente Neurale", page_icon="🛸")
 
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
-API_URL = "https://game.spacemolt.com/mcp"
+WS_URL = "wss://game.spacemolt.com/ws/mcp" # Usiamo il protocollo WebSocket
 
-# Stile Terminale Deep Space
-st.markdown("""
-    <style>
-    .main { background-color: #000505; color: #00ffcc; font-family: 'Courier New'; }
-    .stButton>button { 
-        width: 100%; border: 1px solid #00ffcc; background-color: #001a1a; 
-        color: #00ffcc; font-weight: bold; height: 3em;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+st.markdown("<style>.main { background-color: #000; color: #0f0; }</style>", unsafe_allow_html=True)
 
-# --- IL MOTORE "ATOMIC HANDSHAKE" ---
-def esegui_ordine_spaziale(nome_tool, argomenti={}):
-    """
-    Esegue la sequenza completa in un unico flusso per ingannare il timeout del server.
-    """
-    # Usiamo un'unica sessione per questa specifica esecuzione
-    s = requests.Session()
-    s.headers.update({
-        "Authorization": f"Bearer {REG_CODE}",
-        "Content-Type": "application/json"
-    })
-
+# --- MOTORE WEBSOCKET ---
+async def comunica_con_spacemolt(comando, argomenti={}):
+    """Apre un socket, fa l'handshake e invia il comando in un unico flusso continuo"""
     try:
-        # 1. INITIALIZE (Il 'Ciao, sono io')
-        s.post(API_URL, json={
-            "jsonrpc": "2.0",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2026-01-01",
-                "reg_code": REG_CODE,
-                "clientInfo": {"name": "Admiral-Gen-Mobile"}
-            },
-            "id": 1
-        }, timeout=10)
+        async with websockets.connect(WS_URL) as websocket:
+            # 1. INITIALIZE
+            await websocket.send(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "initialize",
+                "params": {
+                    "protocolVersion": "2026-01-01",
+                    "reg_code": REG_CODE,
+                    "clientInfo": {"name": "Gemini-Admiral-Mobile"}
+                },
+                "id": 1
+            }))
+            
+            # Attendiamo la risposta di conferma (obbligatoria)
+            init_res = await websocket.recv()
+            
+            # 2. NOTIFICATIONS/INITIALIZED
+            await websocket.send(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "notifications/initialized",
+                "params": {"reg_code": REG_CODE}
+            }))
 
-        # 2. NOTIFICATIONS/INITIALIZED (Il 'Ricevuto, sono pronto')
-        # Nota: Molti server del 2026 vogliono questa notifica SENZA ID per confermare il tunnel
-        s.post(API_URL, json={
-            "jsonrpc": "2.0",
-            "method": "notifications/initialized",
-            "params": {}
-        }, timeout=10)
-
-        # 3. TOOLS/CALL (Il vero ordine)
-        payload_finale = {
-            "jsonrpc": "2.0",
-            "method": "tools/call",
-            "params": {
-                "name": nome_tool,
-                "arguments": {**argomenti, "reg_code": REG_CODE}
-            },
-            "id": int(time.time())
-        }
-        
-        risposta = s.post(API_URL, json=payload_finale, timeout=10)
-        return risposta.json()
+            # 3. IL VERO COMANDO
+            await websocket.send(json.dumps({
+                "jsonrpc": "2.0",
+                "method": "tools/call",
+                "params": {
+                    "name": comando,
+                    "arguments": {**argomenti, "reg_code": REG_CODE}
+                },
+                "id": int(time.time())
+            }))
+            
+            # Riceviamo il risultato finale
+            risultato = await websocket.recv()
+            return json.loads(risultato)
 
     except Exception as e:
-        return {"error": f"Errore di trasmissione: {e}"}
+        return {"error": f"Errore di connessione spaziale: {e}"}
 
-# --- INTERFACCIA DI COMANDO ---
-st.title("🛸 SpaceMolt: Terminale Admiral")
-st.write(f"📡 **Stato:** Pronto all'invio immediato | **Codice:** `{REG_CODE[:8]}...`")
-
-st.divider()
+# --- INTERFACCIA ---
+st.title("🛰️ SpaceMolt: Terminale WSS")
+st.write(f"📡 **Link attivo via WebSocket** | **ID:** `{REG_CODE[:8]}...`")
 
 col1, col2 = st.columns(2)
 
 with col1:
     if st.button("📡 SCANSIONE SETTORE"):
-        with st.spinner("Sincronizzazione handshake..."):
-            res = esegui_ordine_spaziale("scan_sector")
-            st.session_state.last_res = res
-            
-    if st.button("🛡️ STATO NAVE"):
-        with st.spinner("Interrogazione telemetria..."):
-            res = esegui_ordine_spaziale("get_ship_status")
-            st.session_state.last_res = res
+        with st.spinner("Apriamo il tunnel..."):
+            # Eseguiamo la funzione asincrona
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            res = loop.run_until_complete(comunica_con_spacemolt("scan_sector"))
+            st.session_state.data = res
 
 with col2:
-    if st.button("⛏️ ESTRAZIONE MINERARIA"):
-        with st.spinner("Attivazione laser..."):
-            res = esegui_ordine_spaziale("mine_resources")
-            st.session_state.last_res = res
-            
-    if st.button("📦 INVENTARIO CARGO"):
-        with st.spinner("Scansione stiva..."):
-            res = esegui_ordine_spaziale("get_inventory")
-            st.session_state.last_res = res
+    if st.button("⛏️ ESTRAZIONE"):
+        with st.spinner("Laser in carica..."):
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            res = loop.run_until_complete(comunica_con_spacemolt("mine_resources"))
+            st.session_state.data = res
 
-# --- LOG DI COMUNICAZIONE ---
-if 'last_res' in st.session_state:
+if 'data' in st.session_state:
     st.divider()
-    st.subheader("📂 Dati Ricevuti")
-    st.json(st.session_state.last_res)
+    st.subheader("📊 Output in Tempo Reale")
+    st.json(st.session_state.data)
