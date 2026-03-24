@@ -8,29 +8,50 @@ st.set_page_config(page_title="SpaceMolt: Terminale Agente", page_icon="🚀")
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-# Stile Terminale
-st.markdown("<style>.main { background-color: #050a0f; color: #00d4ff; font-family: 'Courier New'; }</style>", unsafe_allow_html=True)
-
-# --- FUNZIONE DI SESSIONE (LOGIN) ---
-def inizializza_sessione():
-    """Esegue il login obbligatorio richiesto dal server"""
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "login", # Metodo richiesto dall'errore
-        "params": { "reg_code": REG_CODE },
-        "id": 1
+# Stile Cyber-Terminal
+st.markdown("""
+    <style>
+    .main { background-color: #050a0f; color: #00ff41; font-family: 'Courier New'; }
+    .stButton>button { 
+        width: 100%; border-radius: 4px; background-color: #002200; 
+        color: #00ff41; border: 1px solid #00ff41; font-weight: bold;
     }
+    </style>
+    """, unsafe_allow_html=True)
+
+# --- SEQUENZA DI INIZIALIZZAZIONE (HANDSHAKE) ---
+def esegui_handshake():
+    """Esegue la sequenza: initialize -> notifications/initialized"""
     try:
-        response = requests.post(API_URL, json=payload, timeout=5)
-        res_json = response.json()
-        if "result" in res_json:
-            return True, res_json["result"]
-        else:
-            return False, res_json.get("error", "Errore ignoto")
+        # 1. Chiamata di inizializzazione
+        init_payload = {
+            "jsonrpc": "2.0",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2026-01-01",
+                "clientInfo": {"name": "Gemini-Admiral", "version": "1.0"},
+                "reg_code": REG_CODE
+            },
+            "id": 1
+        }
+        res = requests.post(API_URL, json=init_payload, timeout=5).json()
+        
+        if "error" in res:
+            return False, res["error"]["message"]
+
+        # 2. Notifica di completamento (Obbligatoria per sbloccare il server)
+        notify_payload = {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {}
+        }
+        requests.post(API_URL, json=notify_payload, timeout=5)
+        
+        return True, "Handshake completato con successo!"
     except Exception as e:
         return False, str(e)
 
-# --- FUNZIONE PER COMANDI ---
+# --- FUNZIONE COMANDI ---
 def invia_ordine(nome_comando, argomenti={}):
     payload = {
         "jsonrpc": "2.0",
@@ -48,40 +69,43 @@ def invia_ordine(nome_comando, argomenti={}):
         return {"error": str(e)}
 
 # --- INTERFACCIA ---
-st.title("🛰️ SpaceMolt Control Center")
+st.title("🛰️ SpaceMolt: Hub di Comando")
+st.write(f"**Codice Registrazione:** `{REG_CODE[:8]}...`")
 
-# Gestione Stato Connessione
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
+if 'session_active' not in st.session_state:
+    st.session_state.session_active = False
 
-if not st.session_state.logged_in:
-    if st.button("🔌 STABILISCI CONNESSIONE NEURALE"):
-        successo, msg = inizializza_sessione()
+if not st.session_state.session_active:
+    st.warning("⚠️ Sessione non inizializzata.")
+    if st.button("🔌 AVVIA PROTOCOLLO DI CONNESSIONE"):
+        successo, msg = esegui_handshake()
         if successo:
-            st.session_state.logged_in = True
-            st.success("✅ Sessione Inizializzata! Benvenuto Comandante.")
+            st.session_state.session_active = True
+            st.success(msg)
             st.rerun()
         else:
-            st.error(f"❌ Fallimento Login: {msg}")
+            st.error(f"Fallimento Handshake: {msg}")
 else:
-    st.sidebar.success("📡 Collegato a SpaceMolt")
-    if st.sidebar.button("Esci (Log out)"):
-        st.session_state.logged_in = False
-        st.rerun()
-
-    # Pannello Azioni
-    col1, col2 = st.columns(2)
+    st.success("📡 Collegamento Neurale Stabilito")
+    
+    col1, col2, col3 = st.columns(3)
     with col1:
-        if st.button("📡 Scansione Settore"):
-            res = invia_ordine("scan_sector")
-            st.json(res)
-            
+        if st.button("📡 Scansione"):
+            st.json(invia_ordine("scan_sector"))
     with col2:
         if st.button("⛏️ Estrazione"):
-            res = invia_ordine("mine_resources")
-            st.json(res)
+            st.json(invia_ordine("mine_resources"))
+    with col3:
+        if st.button("🛡️ Stato Nave"):
+            st.json(invia_ordine("get_ship_status"))
 
     st.divider()
-    istruzione = st.text_input("Ordini per l'Ammiraglio (AI)", placeholder="Es. Vai su Plutone")
-    if st.button("ESEGUI"):
-        st.info(f"Ricevuto. Elaborazione rotta per {istruzione}...")
+    
+    # Sezione AI (Ammiraglio)
+    ordine_libero = st.text_input("Comunica con l'Agente IA", placeholder="Es: Spostati verso l'asteroide più ricco")
+    if st.button("ESEGUI ORDINE"):
+        st.info(f"Ricevuto, Comandante. Sto elaborando la sequenza per: {ordine_libero}")
+
+    if st.button("Termina Sessione"):
+        st.session_state.session_active = False
+        st.rerun()
