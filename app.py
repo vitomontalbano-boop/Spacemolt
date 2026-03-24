@@ -3,17 +3,20 @@ import requests
 import time
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="SpaceMolt: Terminale Agente", page_icon="🚀")
+st.set_page_config(page_title="SpaceMolt: Terminale Admiral", page_icon="🚀")
 
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-# --- LOGICA DI COMANDO AVANZATA ---
-def esegui_handshake():
-    """Tenta l'inizializzazione ufficiale"""
+# Stile interfaccia
+st.markdown("<style>.main { background-color: #020408; color: #00d4ff; font-family: 'Courier New'; }</style>", unsafe_allow_html=True)
+
+# --- IL MOTORE "TRIPLE-TAP" ---
+def esegui_missione_completa(nome_comando, argomenti={}):
+    """Esegue l'intera sequenza richiesta dal server in un unico ciclo"""
     try:
-        # 1. Initialize
-        res = requests.post(API_URL, json={
+        # 1. INITIALIZE
+        init_res = requests.post(API_URL, json={
             "jsonrpc": "2.0",
             "method": "initialize",
             "params": {
@@ -24,74 +27,79 @@ def esegui_handshake():
             "id": 1
         }, timeout=10).json()
         
-        if "error" in res:
-            return False, res["error"]["message"]
+        if "error" in init_res:
+            return init_res
 
-        # 2. Notifica obbligatoria
+        # 2. NOTIFICATIONS/INITIALIZED
         requests.post(API_URL, json={
             "jsonrpc": "2.0",
             "method": "notifications/initialized",
-            "params": {"reg_code": REG_CODE} # Aggiunto reg_code anche qui
+            "params": {"reg_code": REG_CODE}
         }, timeout=10)
-        
-        return True, "Handshake inviato correttamente."
-    except Exception as e:
-        return False, str(e)
 
-def invia_ordine(nome_comando, argomenti={}):
-    """Invia l'ordine includendo il REG_CODE nei parametri"""
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": nome_comando,
-            "arguments": {
-                **argomenti,
-                "reg_code": REG_CODE # Inseriamo il codice DIRETTAMENTE nell'azione
+        # 3. IL VERO COMANDO (TOOLS/CALL)
+        payload_comando = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": nome_comando,
+                "arguments": {**argomenti, "reg_code": REG_CODE}
             },
-            "reg_code": REG_CODE # Lo inseriamo anche a livello di parametri generali
-        },
-        "id": int(time.time())
-    }
-    try:
-        response = requests.post(API_URL, json=payload, timeout=10)
-        return response.json()
+            "id": int(time.time())
+        }
+        
+        final_res = requests.post(API_URL, json=payload_comando, timeout=10).json()
+        return final_res
+
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Errore di sistema: {e}"}
 
-# --- INTERFACCIA ---
-st.title("🛰️ SpaceMolt: Terminale di Comando")
+# --- INTERFACCIA UTENTE ---
+st.title("🛰️ SpaceMolt: Comando Strategico")
+st.write(f"**ID Sessione Attivo:** `{REG_CODE[:12]}...`")
 
-if 'ready' not in st.session_state:
-    st.session_state.ready = False
+st.divider()
 
-if not st.session_state.ready:
-    st.info("Sincronizzazione necessaria con i server di SpaceMolt...")
-    if st.button("🔌 AGANCIA SESSIONE NEURALE"):
-        ok, msg = esegui_handshake()
-        if ok:
-            st.session_state.ready = True
-            st.success("Handshake inviato! Prova a eseguire un comando.")
-            st.rerun()
-        else:
-            st.error(f"Errore: {msg}")
-else:
-    st.success("📡 Tunnel Attivo")
+# Pannello Comandi Diretti
+st.subheader("🕹️ Console di Pilotaggio")
+col1, col2 = st.columns(2)
+
+with col1:
+    if st.button("📡 SCANSIONE SETTORE"):
+        with st.spinner("Sincronizzazione handshake..."):
+            risultato = esegui_missione_completa("scan_sector")
+            st.session_state.output = risultato
+
+    if st.button("🛡️ STATO NAVE"):
+        with st.spinner("Interrogazione sistemi..."):
+            risultato = esegui_missione_completa("get_ship_status")
+            st.session_state.output = risultato
+
+with col2:
+    if st.button("⛏️ ESTRAZIONE MINERARIA"):
+        with st.spinner("Attivazione laser..."):
+            risultato = esegui_missione_completa("mine_resources")
+            st.session_state.output = risultato
+
+    if st.button("📦 INVENTARIO STIVA"):
+        with st.spinner("Controllo cargo..."):
+            risultato = esegui_missione_completa("get_inventory")
+            st.session_state.output = risultato
+
+st.divider()
+
+# Visualizzazione Risultati
+if 'output' in st.session_state:
+    st.subheader("📊 Risposta dal Server")
+    st.json(st.session_state.output)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📡 Scansione Settore"):
-            st.json(invia_ordine("scan_sector"))
-        if st.button("🛡️ Stato Nave"):
-            st.json(invia_ordine("get_ship_status"))
-            
-    with col2:
-        if st.button("⛏️ Estrazione Mineraria"):
-            st.json(invia_ordine("mine_resources"))
-        if st.button("📦 Inventario"):
-            st.json(invia_ordine("get_inventory"))
-
-    st.divider()
-    if st.button("Riavvia Sessione"):
-        st.session_state.ready = False
-        st.rerun()
+    # Se il server risponde ancora con l'errore di sessione, proviamo il metodo LOGIN alternativo
+    if isinstance(st.session_state.output, dict) and "error" in st.session_state.output:
+        if "Session not initialized" in st.session_state.output["error"].get("message", ""):
+            st.error("Il server richiede un metodo di LOGIN esplicito. Vuoi tentare il protocollo alternativo?")
+            if st.button("🔑 TENTA LOGIN ALTERNATIVO"):
+                login_res = requests.post(API_URL, json={
+                    "jsonrpc": "2.0", "method": "login", 
+                    "params": {"reg_code": REG_CODE}, "id": 99
+                }).json()
+                st.json(login_res)
