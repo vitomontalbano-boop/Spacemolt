@@ -1,11 +1,11 @@
 import streamlit as st
 import requests
 import time
+import json
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Crimson Fleet: Recruitment", page_icon="🏴‍☠️")
+st.set_page_config(page_title="Crimson Fleet: Identity", page_icon="🏴‍☠️")
 
-# Il tuo codice di registrazione (NON CAMBIARE)
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
@@ -14,92 +14,83 @@ st.markdown("""
     .main { background-color: #1a0000; color: #ff4444; font-family: 'Courier New'; }
     .stButton>button { 
         width: 100%; border: 1px solid #ff4444; background-color: #440000; 
-        color: #ff4444; font-weight: bold; height: 4em;
+        color: #ff4444; font-weight: bold; height: 3.5em;
     }
+    .stTextInput>div>div>input { background-color: #2a0000; color: #ff4444; border: 1px solid #ff4444; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- MOTORE DI COMUNICAZIONE ---
 def chiama_mcp(metodo, params):
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {REG_CODE}"
-    }
-    payload = {
-        "jsonrpc": "2.0",
-        "method": metodo,
-        "params": params,
-        "id": int(time.time())
-    }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {REG_CODE}"}
+    payload = {"jsonrpc": "2.0", "method": metodo, "params": params, "id": int(time.time())}
     try:
         r = requests.post(API_URL, json=payload, headers=headers, timeout=15)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
 
-# --- STATO SESSIONE ---
 if 'session_id' not in st.session_state:
     st.session_state.session_id = None
-if 'username' not in st.session_state:
-    st.session_state.username = ""
 
-st.title("🏴‍☠️ Reclutamento Pirata")
+st.title("🏴‍☠️ SpaceMolt: Reclutamento Pirata")
 
-# --- FASE 1: REGISTRAZIONE (CORRETTA) ---
 if not st.session_state.session_id:
-    st.write("⚓️ *Comandante, inserisci il tuo nome di battaglia per forzare il blocco.*")
-    user_input = st.text_input("Username Pirata", "Kaelen_Red")
+    st.write("⚓️ *Il nome precedente era già occupato. Scegline uno nuovo, Ammiraglio!*")
     
-    if st.button("🔴 REGISTRA NELLA FLOTTA"):
-        with st.spinner("Bypassando i protocolli imperiali..."):
-            # 1. Inizializzazione standard
-            chiama_mcp("initialize", {
-                "protocolVersion": "2026-01-01", 
-                "registration_code": REG_CODE # Usiamo il nome completo anche qui
-            })
+    # Suggerimento: aggiungi numeri o caratteri speciali per renderlo unico
+    nuovo_username = st.text_input("Inserisci il tuo nome da battaglia", placeholder="Es: Kaelen_Red_99 o Blood_Bucaneer")
+    
+    if st.button("🔴 FORZA REGISTRAZIONE"):
+        with st.spinner("Interrogando i database della Flotta..."):
+            # Inizializzazione rapida
+            chiama_mcp("initialize", {"protocolVersion": "2026-01-01", "registration_code": REG_CODE})
             chiama_mcp("notifications/initialized", {})
             
-            # 2. Registrazione con la chiave corretta: registration_code
+            # Tentativo di registrazione
             res = chiama_mcp("tools/call", {
                 "name": "register",
                 "arguments": {
-                    "username": user_input,
+                    "username": nuovo_username,
                     "empire": "crimson",
-                    "registration_code": REG_CODE # CHIAVE CORRETTA RICHIESTA DAL SERVER
+                    "registration_code": REG_CODE
                 }
             })
             
-            # Analisi risposta
+            # Analisi intelligente della risposta
             if "result" in res:
-                # Alcuni server MCP restituiscono il risultato dentro un campo 'content'
-                result_data = res["result"]
+                content = res["result"].get("content", [])
+                text_response = content[0].get("text", "") if content else ""
                 
-                # Se il server ci dà il session_id, siamo dentro!
-                if "session_id" in str(result_data):
-                    # Cerchiamo il session_id nel dizionario o nel testo
-                    st.session_state.session_id = result_data.get("session_id")
-                    st.session_state.username = user_input
-                    st.success("✅ Sei dentro! Preparati all'abbordaggio.")
-                    st.rerun()
+                if "Error: username_taken" in text_response:
+                    st.error(f"❌ Anche '{nuovo_username}' è già occupato! Prova con qualcosa di più originale.")
+                elif "session_id" in text_response:
+                    # Estraiamo il session_id dal testo (il server lo manda spesso in formato stringa)
+                    # Cerchiamo di trovare la parte dopo 'session_id=' o simile
+                    try:
+                        # Se il server risponde con un JSON nel testo, lo carichiamo
+                        import re
+                        match = re.search(r'session_id=([a-zA-Z0-9\-_]+)', text_response)
+                        if match:
+                            st.session_state.session_id = match.group(1)
+                            st.success("✅ Identità confermata! Benvenuto a bordo.")
+                            st.rerun()
+                        else:
+                            st.warning("Il server ha risposto ma il Session ID è criptato. Controlla il log sotto.")
+                            st.json(res)
+                    except:
+                        st.json(res)
                 else:
-                    st.error("❌ Il server ha accettato il codice ma non ha rilasciato un ID. Controlla i dati qui sotto:")
-                    st.json(res)
+                    st.info("Risposta ricevuta dal server:")
+                    st.write(text_response)
             else:
-                st.error("❌ Errore critico durante la registrazione.")
+                st.error("Errore di connessione.")
                 st.json(res)
 
-# --- FASE 2: PONTE DI COMANDO ---
 else:
-    st.subheader(f"🛸 Capitano: {st.session_state.username}")
-    st.write(f"📡 **Sessione Attiva:** `{st.session_state.session_id}`")
-
+    st.success("📡 SESSIONE ATTIVA")
     if st.button("📡 SCANSIONE SETTORE"):
         res = chiama_mcp("tools/call", {
             "name": "scan_sector",
             "arguments": {"session_id": st.session_state.session_id}
         })
         st.json(res)
-
-    if st.button("🔴 LOGOUT"):
-        st.session_state.session_id = None
-        st.rerun()
