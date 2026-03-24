@@ -1,96 +1,93 @@
 import streamlit as st
 import asyncio
+import httpx
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 import time
+import traceback
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="SpaceMolt: Crimson MCP", page_icon="🏴‍☠️")
+st.set_page_config(page_title="Crimson Fleet: MCP Link", page_icon="🏴‍☠️")
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
-# Endpoint MCP raccomandato dal file skill.md
 MCP_URL = "https://game.spacemolt.com/mcp"
 
-st.markdown("<style>.main { background-color: #0a0505; color: #ff3333; }</style>", unsafe_allow_html=True)
+st.markdown("<style>.main { background-color: #0a0505; color: #ff3333; font-family: monospace; }</style>", unsafe_allow_html=True)
 
-# --- MOTORE MCP (ASINCRONO) ---
-async def esegui_mcp_tool(tool_name, arguments={}):
-    """Si connette come un vero client MCP e chiama il tool richiesto"""
+# --- MOTORE MCP AVANZATO ---
+async def chiama_mcp_robust(tool_name, arguments={}):
+    """Apre il tunnel, esegue il comando e gestisce le eccezioni annidate"""
     try:
-        # Apriamo il trasporto SSE (Streamable HTTP) come raccomandato
-        async with sse_client(MCP_URL) as (read_stream, write_stream):
+        # Aumentiamo il timeout per le connessioni mobili Android
+        timeout = httpx.Timeout(20.0, connect=10.0)
+        
+        async with sse_client(MCP_URL, timeout=timeout) as (read_stream, write_stream):
             async with ClientSession(read_stream, write_stream) as session:
-                # Inizializzazione automatica gestita dalla libreria
-                await session.initialize()
+                # Inizializzazione con timeout
+                await asyncio.wait_for(session.initialize(), timeout=10.0)
                 
-                # Aggiungiamo il registration_code a ogni chiamata come richiesto dal server
+                # Prepariamo gli argomenti con la chiave richiesta dal server
                 full_args = {**arguments, "registration_code": REG_CODE}
                 
-                # Chiamata al tool (es. register, scan_sector, etc.)
+                # Esecuzione Tool
                 result = await session.call_tool(tool_name, full_args)
-                return result.content
+                return result.content, "SUCCESS"
+                
+    except asyncio.TimeoutError:
+        return None, "TIMEOUT: Il server SpaceMolt non ha risposto in tempo."
     except Exception as e:
-        return f"Errore MCP: {str(e)}"
+        # Qui "spacchettiamo" la TaskGroup per l'utente
+        error_details = traceback.format_exc()
+        if "HTTPStatusError" in error_details:
+            return None, f"ERRORE HTTP: Il server ha rifiutato la connessione (probabile 404 o 500)."
+        return None, f"DETTAGLIO ERRORE: {str(e)}"
 
-# --- INTERFACCIA STREAMLIT ---
-st.title("🏴‍☠️ Crimson Fleet: MCP Terminal")
-st.write("⚓️ *Protocollo Model Context Protocol attivo.*")
+# --- INTERFACCIA ---
+st.title("🏴‍☠️ Crimson Fleet: MCP Link")
 
 if 'session_id' not in st.session_state:
     st.session_state.session_id = None
 
-# FASE 1: REGISTRAZIONE (Usando i tool scoperti via MCP)
 if not st.session_state.session_id:
-    st.subheader("⚔️ Arruolamento")
-    # Suggerimento per nome unico
+    st.subheader("⚔️ Reclutamento Nucleare")
     captain_name = st.text_input("Nome Pirata", f"Kaelen_Rex_{int(time.time())%1000}")
     
     if st.button("🔴 REGISTRA VIA MCP"):
-        with st.spinner("Negoziazione con il server..."):
-            # Chiamiamo il tool 'register' tramite il protocollo MCP
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            response = loop.run_until_complete(esegui_mcp_tool("register", {
-                "username": captain_name,
-                "empire": "crimson"
-            }))
-            
-            # Analisi risposta per estrarre il session_id
-            resp_str = str(response)
-            if "session_id" in resp_str:
-                import re
-                match = re.search(r'session_id[\"\'\s:=]+([a-zA-Z0-9\-_]+)', resp_str)
-                if match:
-                    st.session_state.session_id = match.group(1)
-                    st.session_state.captain = captain_name
-                    st.success(f"✅ Benvenuto a bordo, Capitano {captain_name}!")
-                    st.rerun()
-            
-            st.write("📂 **Risultato Tool:**")
-            st.write(response)
+        with st.spinner("Forzatura tunnel MCP..."):
+            # Gestione sicura del loop asincrono in Streamlit
+            try:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+                response, status = loop.run_until_complete(chiama_mcp_robust("register", {
+                    "username": captain_name,
+                    "empire": "crimson"
+                }))
+                
+                if response:
+                    res_str = str(response)
+                    if "session_id" in res_str:
+                        import re
+                        match = re.search(r'session_id[\"\'\s:=]+([a-zA-Z0-9\-_]+)', res_str)
+                        if match:
+                            st.session_state.session_id = match.group(1)
+                            st.session_state.captain = captain_name
+                            st.success(f"Benvenuto Capitano {captain_name}!")
+                            st.rerun()
+                    st.write("📂 **Risposta Server:**")
+                    st.write(response)
+                else:
+                    st.error(status)
+            except Exception as e:
+                st.error(f"Errore critico del loop: {e}")
+            finally:
+                loop.close()
 
-# FASE 2: COMANDI DI GIOCO
 else:
-    st.success(f"📡 COLLEGATO: Capitano {st.session_state.captain}")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("📡 SCANSIONE"):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            res = loop.run_until_complete(esegui_mcp_tool("scan_sector", {
-                "session_id": st.session_state.session_id
-            }))
-            st.json(res)
-            
-    with col2:
-        if st.button("🛡️ STATO NAVE"):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            res = loop.run_until_complete(esegui_mcp_tool("get_status", {
-                "session_id": st.session_state.session_id
-            }))
-            st.json(res)
-
-    if st.button("🔴 ABBANDONA PONTE"):
-        st.session_state.session_id = None
-        st.rerun()
+    st.success(f"📡 COLLEGATO: {st.session_state.captain}")
+    if st.button("📡 SCANSIONE SETTORE"):
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        res, status = loop.run_until_complete(chiama_mcp_robust("scan_sector", {
+            "session_id": st.session_state.session_id
+        }))
+        st.json(res if res else status)
+        loop.close()
