@@ -3,102 +3,91 @@ import requests
 import time
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Crimson Fleet: Tool Access", page_icon="🏴‍☠️")
-
+st.set_page_config(page_title="Crimson Fleet: Kaelen-1", page_icon="🏴‍☠️")
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-st.markdown("""
-    <style>
-    .main { background-color: #0a0000; color: #ff3333; font-family: 'Courier New'; }
-    .stButton>button { width: 100%; border: 1px solid #ff3333; background-color: #300; color: #f33; font-weight: bold; }
-    </style>
-    """, unsafe_allow_html=True)
+# Estetica Pirata
+st.markdown("<style>.main { background-color: #100; color: #f33; font-family: monospace; }</style>", unsafe_allow_html=True)
 
-def invia_mcp(metodo, params):
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {REG_CODE}"
-    }
+def chiama_spacemolt(metodo, params):
+    """Il cuore del protocollo MCP: invia richieste JSON-RPC"""
     payload = {
         "jsonrpc": "2.0",
         "method": metodo,
-        "params": params,
+        "params": {**params, "registration_code": REG_CODE},
         "id": int(time.time())
     }
+    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {REG_CODE}"}
     try:
         r = requests.post(API_URL, json=payload, headers=headers, timeout=15)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
 
-# --- LOGICA DI REGISTRAZIONE ---
+# --- STATO DELLA NAVE ---
 if 'session_id' not in st.session_state:
     st.session_state.session_id = None
+if 'username' not in st.session_state:
+    st.session_state.username = ""
 
-st.title("🏴‍☠️ SpaceMolt: Hub Operativo")
+st.title("🏴‍☠️ SpaceMolt: Terminale Kaelen")
 
 if not st.session_state.session_id:
     st.subheader("⚔️ Reclutamento Crimson Fleet")
-    # Generiamo un nome unico per evitare l'errore 'username_taken'
-    temp_name = f"Corsaro_{int(time.time()) % 1000}"
-    user_name = st.text_input("Inserisci il tuo nome pirata", temp_name)
+    # Usiamo un nome pirata unico per evitare l'errore 'username_taken'
+    suggerimento = f"Kaelen_Crimson_{int(time.time()) % 1000}"
+    user_name = st.text_input("Scegli il tuo nome da battaglia", suggerimento)
     
-    if st.button("🔴 AVVIA REGISTRAZIONE STRUMENTALE"):
-        with st.spinner("Sincronizzazione Handshake..."):
-            # 1. Handshake Iniziale (Necessario per ogni sessione)
-            invia_mcp("initialize", {
-                "protocolVersion": "2026-01-01", 
-                "registration_code": REG_CODE
-            })
-            invia_mcp("notifications/initialized", {})
+    if st.button("🔴 GIURA FEDELTÀ ALLA FLOTTA"):
+        with st.spinner("Sincronizzazione neurale..."):
+            # 1. Inizializzazione (Sempre richiesta)
+            chiama_spacemolt("initialize", {"protocolVersion": "2026-01-01"})
+            chiama_spacemolt("notifications/initialized", {})
             
-            # 2. CHIAMATA AL TOOL (Ecco la correzione!)
-            # register non è un metodo, è un TOOL chiamato via tools/call
-            res = invia_mcp("tools/call", {
-                "name": "register",
-                "arguments": {
-                    "username": user_name,
-                    "empire": "crimson",
-                    "registration_code": REG_CODE
-                }
+            # 2. Registrazione (Tentativo come metodo DIRETTO, non come tool)
+            res = chiama_spacemolt("register", {
+                "username": user_name,
+                "empire": "crimson"
             })
             
-            st.write("📂 **Analisi Risposta:**")
-            if "result" in res:
-                # Il server risponde con una lista in 'content'
-                content = res["result"].get("content", [])
-                text_out = content[0].get("text", "") if content else ""
-                
-                # Cerchiamo il Session ID nella risposta testuale
-                if "session_id" in text_out.lower() or "session_id" in str(res):
-                    # Cerchiamo di estrarre il token (spesso è una stringa lunga)
-                    import re
-                    match = re.search(r'session_id[\"\'\s:=]+([a-zA-Z0-9\-_]+)', str(res))
-                    if match:
-                        st.session_state.session_id = match.group(1)
-                        st.success(f"✅ Benvenuto, Capitano {user_name}! Sessione sbloccata.")
-                        st.rerun()
-                    else:
-                        st.warning("Il server ha risposto ma l'ID è nascosto. Controlla il JSON sotto.")
-                        st.json(res)
-                else:
-                    st.error("Il server ha rifiutato la registrazione. Leggi il messaggio:")
-                    st.json(res)
-            else:
-                st.error("Errore di protocollo.")
-                st.json(res)
-else:
-    st.success(f"📡 COLLEGATO: Sessione `{st.session_state.session_id[:12]}...`")
-    
-    if st.button("📡 SCANSIONE RADAR"):
-        # Anche la scansione è un TOOL
-        scan = invia_mcp("tools/call", {
-            "name": "scan_sector",
-            "arguments": {"session_id": st.session_state.session_id}
-        })
-        st.json(scan)
+            # Controllo se la risposta contiene il session_id (anche se annidato)
+            res_str = str(res)
+            if "session_id" in res_str:
+                # Estrazione rozza ma efficace del session_id
+                import re
+                match = re.search(r'session_id[\"\'\s:=]+([a-zA-Z0-9\-_]+)', res_str)
+                if match:
+                    st.session_state.session_id = match.group(1)
+                    st.session_state.username = user_name
+                    st.success(f"Benvenuto, Capitano {user_name}!")
+                    st.rerun()
+            
+            st.error("Il server non ha rilasciato l'ID. Debug:")
+            st.json(res)
 
-    if st.button("🔴 RESET SESSIONE"):
+else:
+    # --- PANNELLO OPERATIVO ---
+    st.success(f"📡 COLLEGATO: {st.session_state.username}")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📡 SCANSIONE"):
+            # Nota: il server vuole session_id dentro i params
+            res = chiama_spacemolt("tools/call", {
+                "name": "scan_sector", 
+                "arguments": {"session_id": st.session_state.session_id}
+            })
+            st.json(res)
+            
+    with col2:
+        if st.button("🛡️ STATO"):
+            res = chiama_spacemolt("tools/call", {
+                "name": "get_status", 
+                "arguments": {"session_id": st.session_state.session_id}
+            })
+            st.json(res)
+
+    if st.button("🔴 LOGOUT"):
         st.session_state.session_id = None
         st.rerun()
