@@ -2,124 +2,120 @@ import streamlit as st
 import requests
 import time
 
-# --- CONFIGURAZIONE DI SISTEMA ---
-st.set_page_config(page_title="SpaceMolt: Ammiragliato", page_icon="🛸", layout="wide")
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="SpaceMolt: Terminale Admiral", page_icon="🚀", layout="wide")
 
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-# Stile Terminale Avanzato
+# Stile Terminale Hard-Coded
 st.markdown("""
     <style>
-    .main { background-color: #04090d; color: #00f2ff; font-family: 'Share Tech Mono', monospace; }
+    .main { background-color: #010a01; color: #33ff33; font-family: 'Courier New', monospace; }
     .stButton>button { 
-        width: 100%; border-radius: 0px; background-color: #0a1a2a; 
-        color: #00f2ff; border: 1px solid #00f2ff; transition: 0.3s;
+        width: 100%; border: 1px solid #33ff33; background-color: #001100; 
+        color: #33ff33; font-weight: bold; border-radius: 0px;
     }
-    .stButton>button:hover { background-color: #00f2ff; color: #04090d; }
+    .stButton>button:active { background-color: #33ff33; color: black; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- MOTORE DI COMUNICAZIONE PERSISTENTE ---
-if 'spacemolt_session' not in st.session_state:
-    # Creiamo una sessione che mantiene gli Header di sicurezza per ogni chiamata
-    session = requests.Session()
-    session.headers.update({
-        "Authorization": f"Bearer {REG_CODE}",
-        "X-Registration-Code": REG_CODE,
-        "Content-Type": "application/json",
-        "User-Agent": "SpaceMolt-Admiral-Agent/2026.1"
-    })
-    st.session_state.spacemolt_session = session
-
-def esegui_handshake_totale():
-    """Inizializzazione forzata con protocollo MCP standard"""
-    s = st.session_state.spacemolt_session
-    try:
-        # 1. Initialize (Passiamo il codice anche qui per ridondanza)
-        init_payload = {
-            "jsonrpc": "2.0", "method": "initialize",
+# --- MOTORE BATCH (IL "CUORE" DELL'APP) ---
+def esegui_comando_batch(nome_tool, argomenti={}):
+    """
+    Invia un pacchetto BATCH: [Initialize, Initialized, ToolCall]
+    Questo risolve il problema della sessione che scade istantaneamente.
+    """
+    batch_payload = [
+        # 1. Passo: Inizializzazione
+        {
+            "jsonrpc": "2.0",
+            "method": "initialize",
             "params": {
                 "protocolVersion": "2026-01-01",
-                "capabilities": {"tools": {}},
-                "clientInfo": {"name": "Gemini-Admiral", "version": "2.0"},
-                "reg_code": REG_CODE
+                "reg_code": REG_CODE,
+                "clientInfo": {"name": "Gemini-Admiral-Mobile", "version": "3.0"}
             },
-            "id": 1
-        }
-        r1 = s.post(API_URL, json=init_payload, timeout=10).json()
-        
-        # 2. Notifications/Initialized (Senza ID come da specifiche JSON-RPC)
-        notify_payload = {
-            "jsonrpc": "2.0", "method": "notifications/initialized", "params": {}
-        }
-        s.post(API_URL, json=notify_payload, timeout=10)
-        
-        return r1
-    except Exception as e:
-        return {"error": str(e)}
-
-def invia_comando_mcp(tool_name, args={}):
-    """Invia il comando finale usando il tunnel già aperto"""
-    s = st.session_state.spacemolt_session
-    payload = {
-        "jsonrpc": "2.0",
-        "method": "tools/call",
-        "params": {
-            "name": tool_name,
-            "arguments": {**args, "token": REG_CODE} # Alcuni server vogliono 'token' invece di 'reg_code'
+            "id": 101
         },
-        "id": int(time.time())
-    }
+        # 2. Passo: Notifica di conferma (senza ID come da protocollo)
+        {
+            "jsonrpc": "2.0",
+            "method": "notifications/initialized",
+            "params": {"reg_code": REG_CODE}
+        },
+        # 3. Passo: Il comando reale che vogliamo eseguire
+        {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": nome_tool,
+                "arguments": {**argomenti, "reg_code": REG_CODE}
+            },
+            "id": 102
+        }
+    ]
+
     try:
-        r = s.post(API_URL, json=payload, timeout=10)
-        return r.json()
+        # Invio del pacchetto unico
+        response = requests.post(
+            API_URL, 
+            json=batch_payload, 
+            headers={"Authorization": f"Bearer {REG_CODE}"},
+            timeout=15
+        )
+        
+        risultati = response.json()
+        
+        # Cerchiamo la risposta del comando reale (quello con ID 102)
+        if isinstance(risultati, list):
+            for r in risultati:
+                if r.get("id") == 102:
+                    return r
+            return risultati # Se non lo trova, restituisce tutto il batch
+        return risultati
+        
     except Exception as e:
-        return {"error": str(e)}
+        return {"error": f"Errore critico di trasmissione: {e}"}
 
 # --- INTERFACCIA DI COMANDO ---
-st.title("🛰️ SPACEMOLT: TERMINALE AMMIRAGLIO")
-st.write(f"📡 **Agente ID:** `{REG_CODE[:12]}`... | **Status:** Collegamento Criptato")
+st.title("🛰️ SPACEMOLT: COMANDO BATCH")
+st.write(f"📡 **Agente:** `CAPTAIN-GEN-2026` | **Link:** `OPEN-BATCH-PROTOCOL`")
 
-if 'connesso' not in st.session_state:
-    st.session_state.connesso = False
+st.divider()
 
-if not st.session_state.connesso:
-    st.info("⚠️ Il server richiede l'apertura di un tunnel MCP sicuro.")
-    if st.button("🔌 APRI TUNNEL QUANTISTICO"):
-        with st.spinner("Sincronizzazione orologio di sistema..."):
-            res = esegui_handshake_totale()
-            if "error" not in res:
-                st.session_state.connesso = True
-                st.success("✅ Handshake completato! Sessione sbloccata.")
-                st.rerun()
-            else:
-                st.error(f"Errore: {res['error']}")
-else:
-    st.success("🛰️ CONNESSIONE STABILE - FLOTTA PRONTA")
+col1, col2 = st.columns(2)
+
+with col1:
+    st.subheader("📡 Sistemi di Bordo")
+    if st.button("SCANSIONE RADAR"):
+        with st.spinner("Compilazione pacchetto Batch..."):
+            st.session_state.last_op = esegui_comando_batch("scan_sector")
+            
+    if st.button("STATO STRUTTURALE"):
+        with st.spinner("Interrogazione telemetria..."):
+            st.session_state.last_op = esegui_comando_batch("get_ship_status")
+
+with col2:
+    st.subheader("⛏️ Operazioni Minerarie")
+    if st.button("ATTIVA LASER MINERARI"):
+        with st.spinner("Sequenza di estrazione..."):
+            st.session_state.last_op = esegui_comando_batch("mine_resources")
+            
+    if st.button("VERIFICA CARGO"):
+        with st.spinner("Analisi inventario..."):
+            st.session_state.last_op = esegui_comando_batch("get_inventory")
+
+# --- OUTPUT CONSOLE ---
+st.divider()
+if 'last_op' in st.session_state:
+    st.write("📂 **Dati Ricevuti dal Settore:**")
+    st.json(st.session_state.last_op)
     
-    col1, col2 = st.columns(2)
-    with col1:
-        st.subheader("📡 Esplorazione")
-        if st.button("SCANSIONE SETTORE"):
-            st.session_state.output = invia_comando_mcp("scan_sector")
-        if st.button("STATO NAVE"):
-            st.session_state.output = invia_comando_mcp("get_ship_status")
-
-    with col2:
-        st.subheader("⛏️ Operazioni")
-        if st.button("ESTRAZIONE MINERARIA"):
-            st.session_state.output = invia_comando_mcp("mine_resources")
-        if st.button("INVENTARIO"):
-            st.session_state.output = invia_comando_mcp("get_inventory")
-
-    # Output Console
-    st.divider()
-    if 'output' in st.session_state:
-        st.write("📂 **Risposta Server:**")
-        st.json(st.session_state.output)
-
-    if st.button("🔴 CHIUDI CONNESSIONE"):
-        st.session_state.connesso = False
-        st.session_state.spacemolt_session = requests.Session() # Reset
-        st.rerun()
+    # Check di debug per l'utente
+    if "error" in st.session_state.last_op:
+        msg = st.session_state.last_op["error"].get("message", "")
+        if "Session not initialized" in msg:
+            st.error("❗ Il server rifiuta persino il Batch. Potrebbe esserci un blocco sul Registration Code.")
+else:
+    st.info("In attesa di istruzioni. Seleziona un'azione per avviare il protocollo.")
