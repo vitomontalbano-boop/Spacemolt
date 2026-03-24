@@ -2,111 +2,104 @@ import streamlit as st
 import requests
 import time
 
-# --- CONFIGURAZIONE DI BORDO ---
-st.set_page_config(page_title="SpaceMolt: Crimson Fleet Terminal", page_icon="🏴‍☠️")
+# --- CONFIGURAZIONE ---
+st.set_page_config(page_title="Crimson Fleet: Recruitment", page_icon="🏴‍☠️")
 
+# Il tuo codice di registrazione (NON CAMBIARE)
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 API_URL = "https://game.spacemolt.com/mcp"
 
-# Stile Pirata (Rosso e Nero)
 st.markdown("""
     <style>
-    .main { background-color: #1a0000; color: #ff3333; font-family: 'Courier New'; }
+    .main { background-color: #1a0000; color: #ff4444; font-family: 'Courier New'; }
     .stButton>button { 
-        width: 100%; border: 1px solid #ff3333; background-color: #330000; 
-        color: #ff3333; font-weight: bold; height: 3.5em;
+        width: 100%; border: 1px solid #ff4444; background-color: #440000; 
+        color: #ff4444; font-weight: bold; height: 4em;
     }
-    .stTextInput>div>div>input { background-color: #220000; color: #ff3333; }
     </style>
     """, unsafe_allow_html=True)
 
 # --- MOTORE DI COMUNICAZIONE ---
 def chiama_mcp(metodo, params):
-    headers = {"Content-Type": "application/json", "Authorization": f"Bearer {REG_CODE}"}
-    payload = {"jsonrpc": "2.0", "method": metodo, "params": params, "id": int(time.time())}
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {REG_CODE}"
+    }
+    payload = {
+        "jsonrpc": "2.0",
+        "method": metodo,
+        "params": params,
+        "id": int(time.time())
+    }
     try:
         r = requests.post(API_URL, json=payload, headers=headers, timeout=15)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
 
-# --- GESTIONE STATO NAVE ---
+# --- STATO SESSIONE ---
 if 'session_id' not in st.session_state:
     st.session_state.session_id = None
-if 'captain_name' not in st.session_state:
-    st.session_state.captain_name = ""
+if 'username' not in st.session_state:
+    st.session_state.username = ""
 
-st.title("🏴‍☠️ Crimson Fleet: Hub Pirata")
-st.write(f"📡 **Status:** {'Sincronizzato' if st.session_state.session_id else 'In attesa di registrazione'}")
+st.title("🏴‍☠️ Reclutamento Pirata")
 
-# --- FASE 1: REGISTRAZIONE ---
+# --- FASE 1: REGISTRAZIONE (CORRETTA) ---
 if not st.session_state.session_id:
-    st.subheader("⚔️ Reclutamento Capitano")
-    username = st.text_input("Scegli il tuo nome da battaglia (es: Kaelen_Red)", "Kaelen_Red")
+    st.write("⚓️ *Comandante, inserisci il tuo nome di battaglia per forzare il blocco.*")
+    user_input = st.text_input("Username Pirata", "Kaelen_Red")
     
-    if st.button("🔴 REGISTRA NELLA CRIMSON FLEET"):
-        with st.spinner("Inizializzando link neurale..."):
-            # Handshake obbligatorio
-            chiama_mcp("initialize", {"protocolVersion": "2026-01-01", "reg_code": REG_CODE})
+    if st.button("🔴 REGISTRA NELLA FLOTTA"):
+        with st.spinner("Bypassando i protocolli imperiali..."):
+            # 1. Inizializzazione standard
+            chiama_mcp("initialize", {
+                "protocolVersion": "2026-01-01", 
+                "registration_code": REG_CODE # Usiamo il nome completo anche qui
+            })
             chiama_mcp("notifications/initialized", {})
             
-            # Registrazione come Pirata
+            # 2. Registrazione con la chiave corretta: registration_code
             res = chiama_mcp("tools/call", {
                 "name": "register",
                 "arguments": {
-                    "username": username,
-                    "empire": "crimson", # Forzato su Crimson Fleet per il playstyle scelto
-                    "reg_code": REG_CODE
+                    "username": user_input,
+                    "empire": "crimson",
+                    "registration_code": REG_CODE # CHIAVE CORRETTA RICHIESTA DAL SERVER
                 }
             })
             
-            if "result" in res and "session_id" in res["result"]:
-                st.session_state.session_id = res["result"]["session_id"]
-                st.session_state.captain_name = username
-                st.success(f"Benvenuto a bordo, Capitano {username}! La galassia tremerà.")
-                st.rerun()
+            # Analisi risposta
+            if "result" in res:
+                # Alcuni server MCP restituiscono il risultato dentro un campo 'content'
+                result_data = res["result"]
+                
+                # Se il server ci dà il session_id, siamo dentro!
+                if "session_id" in str(result_data):
+                    # Cerchiamo il session_id nel dizionario o nel testo
+                    st.session_state.session_id = result_data.get("session_id")
+                    st.session_state.username = user_input
+                    st.success("✅ Sei dentro! Preparati all'abbordaggio.")
+                    st.rerun()
+                else:
+                    st.error("❌ Il server ha accettato il codice ma non ha rilasciato un ID. Controlla i dati qui sotto:")
+                    st.json(res)
             else:
-                st.error(f"Errore di registrazione: {res}")
+                st.error("❌ Errore critico durante la registrazione.")
+                st.json(res)
 
-# --- FASE 2: OPERAZIONI PIRATA ---
+# --- FASE 2: PONTE DI COMANDO ---
 else:
-    st.subheader(f"🛸 Nave: Blood Cipher | Capitano: {st.session_state.captain_name}")
-    st.caption(f"Session Token: {st.session_state.session_id[:15]}...")
+    st.subheader(f"🛸 Capitano: {st.session_state.username}")
+    st.write(f"📡 **Sessione Attiva:** `{st.session_state.session_id}`")
 
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        if st.button("📡 SCANSIONE PREDE"):
-            res = chiama_mcp("tools/call", {
-                "name": "scan_sector",
-                "arguments": {"session_id": st.session_state.session_id}
-            })
-            st.session_state.last_op = res
-            
-        if st.button("🛡️ STATO NAVE"):
-            res = chiama_mcp("tools/call", {
-                "name": "get_status",
-                "arguments": {"session_id": st.session_state.session_id}
-            })
-            st.session_state.last_op = res
+    if st.button("📡 SCANSIONE SETTORE"):
+        res = chiama_mcp("tools/call", {
+            "name": "scan_sector",
+            "arguments": {"session_id": st.session_state.session_id}
+        })
+        st.json(res)
 
-    with col2:
-        if st.button("🏴‍☠️ ATTACCO / ABBORDAGGIO"):
-            # Qui si potrebbero aggiungere coordinate o target
-            st.warning("Seleziona prima un bersaglio dalla scansione!")
-            
-        if st.button("📦 BOTTINO (Inventario)"):
-            res = chiama_mcp("tools/call", {
-                "name": "get_inventory",
-                "arguments": {"session_id": st.session_state.session_id}
-            })
-            st.session_state.last_op = res
-
-    if 'last_op' in st.session_state:
-        st.divider()
-        st.write("📂 **Dati Sensori:**")
-        st.json(st.session_state.last_op)
-
-    if st.button("🔴 ABBANDONA NAVE (Logout)"):
+    if st.button("🔴 LOGOUT"):
         st.session_state.session_id = None
         st.rerun()
