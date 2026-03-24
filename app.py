@@ -3,97 +3,81 @@ import requests
 import time
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="Crimson Fleet: Final Enrollment", page_icon="🏴‍☠️")
-
+st.set_page_config(page_title="Crimson Fleet: Persistent Hub", page_icon="🏴‍☠️")
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
 BASE_URL = "https://game.spacemolt.com/api/v1"
 
-st.markdown("""
-    <style>
-    .main { background-color: #050000; color: #ff3333; font-family: 'Courier New'; }
-    .stButton>button { 
-        width: 100%; border: 1px solid #ff3333; background-color: #200; 
-        color: #f33; font-weight: bold; height: 3.5em;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-def esegui_api_v1(comando, dati={}):
+# --- MOTORE API ---
+def esegui_api(comando, dati={}):
     url = f"{BASE_URL}/{comando}"
-    headers = {
-        "Content-Type": "application/json",
-        "X-Registration-Code": REG_CODE
-    }
+    headers = {"Content-Type": "application/json", "X-Registration-Code": REG_CODE}
     if st.session_state.get('session_id'):
         headers["X-Session-Id"] = st.session_state.session_id
-
     try:
         r = requests.post(url, json=dati, headers=headers, timeout=15)
         return r.json()
     except Exception as e:
         return {"error": str(e)}
 
+# --- STATO SESSIONE ---
 if 'session_id' not in st.session_state:
     st.session_state.session_id = None
 
-st.title("🏴‍☠️ Crimson Fleet: Terminale Operativo")
+st.title("🏴‍☠️ Terminale Crimson Fleet")
 
-# --- PASSO 1: AGGANCIO SESSIONE ---
+
+
+# --- LOGICA DI ACCESSO ---
 if not st.session_state.session_id:
-    st.info("📡 In attesa di stabilire il link con SpaceMolt...")
-    if st.button("🔌 STABILISCI LINK (V1)"):
-        res = esegui_api_v1("session", {"registration_code": REG_CODE})
-        if "session" in res and "id" in res["session"]:
-            st.session_state.session_id = res["session"]["id"]
-            st.success("✅ Link Stabilito! Sessione acquisita.")
-            st.rerun()
-        else:
-            st.error("Errore nell'estrazione del Session ID.")
-            st.json(res)
-
-# --- PASSO 2: ARRUOLAMENTO (CORRETTO) ---
-else:
-    st.success(f"🛰️ TUNNEL ATTIVO | ID: {st.session_state.session_id[:12]}...")
+    tab_login, tab_register = st.tabs(["🔑 Login", "⚔️ Registrazione"])
     
-    if 'registered' not in st.session_state:
-        st.subheader("⚔️ Registro di Arruolamento")
-        # Generiamo un nome unico per evitare 'username_taken'
-        default_name = f"Corsaro_{int(time.time()) % 1000}"
-        cap_name = st.text_input("Scegli il tuo nome da pirata", default_name)
-        
-        if st.button("🔴 GIURA FEDELTÀ ALLA FLOTTA"):
-            with st.spinner("Firmando il contratto di sangue..."):
-                # IL FIX: Aggiungiamo il registration_code nel corpo della richiesta
-                res = esegui_api_v1("register", {
-                    "username": cap_name,
-                    "empire": "crimson",
-                    "registration_code": REG_CODE # <--- OBBLIGATORIO QUI
-                })
-                
-                # Controllo risposta (Il server restituisce i dati del player se OK)
-                if "error" not in str(res).lower():
-                    st.session_state.registered = True
-                    st.session_state.cap_name = cap_name
-                    st.success(f"Benvenuto Capitano {cap_name}! La galassia è nostra.")
+    with tab_login:
+        st.subheader("Rientro in Servizio")
+        l_user = st.text_input("Username", key="l_user")
+        l_pass = st.text_input("Password (256-bit)", type="password", key="l_pass")
+        if st.button("🔌 ACCEDI"):
+            # Prima apriamo la sessione, poi logghiamo
+            s_res = esegui_api("session", {"registration_code": REG_CODE})
+            if "session" in s_res:
+                st.session_state.session_id = s_res["session"]["id"]
+                log_res = esegui_api("login", {"username": l_user, "password": l_pass})
+                if "error" not in str(log_res).lower():
+                    st.session_state.logged_in = True
+                    st.session_state.cap_name = l_user
+                    st.success(f"Bentornato, Capitano {l_user}!")
                     st.rerun()
                 else:
-                    st.error("L'arruolamento è fallito di nuovo. Analizziamo il log:")
-                    st.json(res)
-    
-    # --- PASSO 3: PONTE DI COMANDO ---
-    else:
-        st.subheader(f"🛸 Ponte di Comando: {st.session_state.cap_name}")
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("📡 SCANSIONE RADAR"):
-                res = esegui_api_v1("scan_sector")
-                st.json(res)
-        with col2:
-            if st.button("🛡️ STATO NAVE"):
-                res = esegui_api_v1("get_status")
-                st.json(res)
+                    st.error("Credenziali errate o sessione fallita.")
+                    st.json(log_res)
 
-    if st.button("🔴 RESET"):
+    with tab_register:
+        st.subheader("Nuovo Reclutamento")
+        r_user = st.text_input("Nome Pirata", f"Corsaro_{int(time.time())%1000}")
+        if st.button("🔴 REGISTRA NUOVO ACCOUNT"):
+            s_res = esegui_api("session", {"registration_code": REG_CODE})
+            if "session" in s_res:
+                st.session_state.session_id = s_res["session"]["id"]
+                reg_res = esegui_api("register", {"username": r_user, "empire": "crimson", "registration_code": REG_CODE})
+                if "error" not in str(reg_res).lower():
+                    st.success("✅ REGISTRATO! COPIA QUESTA PASSWORD E NON PERDERLA:")
+                    # Il server restituisce la password qui
+                    st.code(reg_res.get("result", {}).get("password", "Password non trovata nel JSON"))
+                    st.info("Dopo aver salvato la password, usa il tab Login.")
+                else:
+                    st.error("Errore registrazione.")
+                    st.json(reg_res)
+
+# --- PONTE DI COMANDO ---
+else:
+    st.subheader(f"🛸 Capitano: {st.session_state.get('cap_name', 'In attesa')}")
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("📡 SCANSIONE"):
+            st.json(esegui_api("scan_sector"))
+    with col2:
+        if st.button("🛡️ STATO"):
+            st.json(esegui_api("get_status"))
+            
+    if st.button("🔴 LOGOUT"):
         st.session_state.session_id = None
-        st.session_state.pop('registered', None)
         st.rerun()
