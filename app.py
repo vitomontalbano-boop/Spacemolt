@@ -1,86 +1,95 @@
 import streamlit as st
-import asyncio
-import websockets
-import json
+import requests
 import time
 
 # --- CONFIGURAZIONE ---
-st.set_page_config(page_title="SpaceMolt: Agente Neurale", page_icon="🛸")
+st.set_page_config(page_title="SpaceMolt Admiral", page_icon="🛸")
 
 REG_CODE = "8b4586fc4c72d5814472c5f35a93c235"
-WS_URL = "wss://game.spacemolt.com/ws/mcp" # Usiamo il protocollo WebSocket
+API_URL = "https://game.spacemolt.com/mcp"
 
-st.markdown("<style>.main { background-color: #000; color: #0f0; }</style>", unsafe_allow_html=True)
+# Stile Ultra-Minimal per Android
+st.markdown("""
+    <style>
+    .main { background-color: #000; color: #00ff41; font-family: monospace; }
+    .stButton>button { 
+        width: 100%; height: 4em; background-color: #003300; 
+        color: #00ff41; border: 1px solid #00ff41; font-weight: bold;
+    }
+    </style>
+    """, unsafe_allow_html=True)
 
-# --- MOTORE WEBSOCKET ---
-async def comunica_con_spacemolt(comando, argomenti={}):
-    """Apre un socket, fa l'handshake e invia il comando in un unico flusso continuo"""
+# --- MOTORE DI COMUNICAZIONE "FLASH" ---
+def esegui_azione_totale(nome_comando):
+    """Esegue Handshake + Comando in un'unica sessione HTTP persistente"""
+    s = requests.Session()
+    # Header specifici per il protocollo SpaceMolt 2026
+    s.headers.update({
+        "Authorization": f"Bearer {REG_CODE}",
+        "X-SpaceMolt-Token": REG_CODE,
+        "Content-Type": "application/json"
+    })
+
     try:
-        async with websockets.connect(WS_URL) as websocket:
-            # 1. INITIALIZE
-            await websocket.send(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "initialize",
-                "params": {
-                    "protocolVersion": "2026-01-01",
-                    "reg_code": REG_CODE,
-                    "clientInfo": {"name": "Gemini-Admiral-Mobile"}
-                },
-                "id": 1
-            }))
-            
-            # Attendiamo la risposta di conferma (obbligatoria)
-            init_res = await websocket.recv()
-            
-            # 2. NOTIFICATIONS/INITIALIZED
-            await websocket.send(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "notifications/initialized",
-                "params": {"reg_code": REG_CODE}
-            }))
+        # 1. INITIALIZE
+        s.post(API_URL, json={
+            "jsonrpc": "2.0", "method": "initialize",
+            "params": {"protocolVersion": "2026-01-01", "reg_code": REG_CODE},
+            "id": 1
+        }, timeout=5)
 
-            # 3. IL VERO COMANDO
-            await websocket.send(json.dumps({
-                "jsonrpc": "2.0",
-                "method": "tools/call",
-                "params": {
-                    "name": comando,
-                    "arguments": {**argomenti, "reg_code": REG_CODE}
-                },
-                "id": int(time.time())
-            }))
-            
-            # Riceviamo il risultato finale
-            risultato = await websocket.recv()
-            return json.loads(risultato)
+        # 2. NOTIFICATIONS/INITIALIZED
+        s.post(API_URL, json={
+            "jsonrpc": "2.0", "method": "notifications/initialized",
+            "params": {"reg_code": REG_CODE}
+        }, timeout=5)
+
+        # 3. IL VERO COMANDO (L'azione scelta dall'utente)
+        payload = {
+            "jsonrpc": "2.0",
+            "method": "tools/call",
+            "params": {
+                "name": nome_comando,
+                "arguments": {"reg_code": REG_CODE}
+            },
+            "id": int(time.time())
+        }
+        
+        r = s.post(API_URL, json=payload, timeout=10)
+        return r.json()
 
     except Exception as e:
-        return {"error": f"Errore di connessione spaziale: {e}"}
+        return {"error": f"Errore Link: {e}"}
 
 # --- INTERFACCIA ---
-st.title("🛰️ SpaceMolt: Terminale WSS")
-st.write(f"📡 **Link attivo via WebSocket** | **ID:** `{REG_CODE[:8]}...`")
+st.title("🛰️ SpaceMolt Admiral")
+st.write(f"📡 Link: `ATTIVO` | ID: `{REG_CODE[:8]}`")
 
+st.divider()
+
+# Griglia di comando per Android
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("📡 SCANSIONE SETTORE"):
-        with st.spinner("Apriamo il tunnel..."):
-            # Eseguiamo la funzione asincrona
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            res = loop.run_until_complete(comunica_con_spacemolt("scan_sector"))
-            st.session_state.data = res
+    if st.button("📡 SCANSIONE"):
+        res = esegui_azione_totale("scan_sector")
+        st.session_state.last_op = res
+
+    if st.button("🛡️ NAVE"):
+        res = esegui_azione_totale("get_ship_status")
+        st.session_state.last_op = res
 
 with col2:
     if st.button("⛏️ ESTRAZIONE"):
-        with st.spinner("Laser in carica..."):
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            res = loop.run_until_complete(comunica_con_spacemolt("mine_resources"))
-            st.session_state.data = res
+        res = esegui_azione_totale("mine_resources")
+        st.session_state.last_res = res
 
-if 'data' in st.session_state:
+    if st.button("📦 CARGO"):
+        res = esegui_azione_totale("get_inventory")
+        st.session_state.last_op = res
+
+# Display Risultati
+if 'last_op' in st.session_state:
     st.divider()
-    st.subheader("📊 Output in Tempo Reale")
-    st.json(st.session_state.data)
+    st.subheader("📂 Dati Ricevuti")
+    st.json(st.session_state.last_op)
